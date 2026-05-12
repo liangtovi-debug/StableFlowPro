@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift package build
+        run: swift build -c release
+
+      - name: Xcode build
+        run: |
+          xcodebuild \
+            -project StableFlowPro.xcodeproj \
+            -scheme StableFlowPro \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            build

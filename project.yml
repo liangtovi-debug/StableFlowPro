@@ -1,0 +1,19 @@
+name: StableFlowPro
+options:
+  bundleIdPrefix: com.stableflow
+  deploymentTarget:
+    macOS: "13.0"
+
+targets:
+  StableFlowPro:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stableflow.pro
+        PRODUCT_NAME: StableFlowPro
+        GENERATE_INFOPLIST_FILE: true
+        COMBINE_HIDPI_IMAGES: true
+        MTL_ENABLE_DEBUG_INFO: INCLUDE_SOURCE

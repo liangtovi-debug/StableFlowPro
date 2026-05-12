@@ -1,0 +1,325 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		15AAB8B869B2941A93F45957 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = D479DDDFA49EB5EC07F39F3B /* Shaders.metal */; };
+		1A1F214E28E84BFA9D1C8E11 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 6A50DB6B24274F88B01609D1 /* AppIcon.icns */; };
+		456FCC699695E48D13DA6662 /* MetalStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82EDEBB721F781CF765EABFA /* MetalStabilizer.swift */; };
+		644BFB132789782AE755FC7C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3737B9713CDD8B4CABD89986 /* ContentView.swift */; };
+		717313CC3B3A1451C37998DD /* FeatureMotionEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15F02474077F72697ECBD37 /* FeatureMotionEstimator.swift */; };
+		84FE55B9A6A7F6779836A1B6 /* GPUStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B118A7523930AECE3D194DF /* GPUStabilizer.swift */; };
+		FC90D0733CA4525CE3BA7CED /* ImprovedStabilizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69495682672F9F336D7DD1F2 /* ImprovedStabilizer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3737B9713CDD8B4CABD89986 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6A50DB6B24274F88B01609D1 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = AppIcon.icns; path = Resources/AppIcon.icns; sourceTree = SOURCE_ROOT; };
+		69495682672F9F336D7DD1F2 /* ImprovedStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImprovedStabilizer.swift; sourceTree = "<group>"; };
+		82EDEBB721F781CF765EABFA /* MetalStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalStabilizer.swift; sourceTree = "<group>"; };
+		8B118A7523930AECE3D194DF /* GPUStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GPUStabilizer.swift; sourceTree = "<group>"; };
+		B15F02474077F72697ECBD37 /* FeatureMotionEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureMotionEstimator.swift; sourceTree = "<group>"; };
+		D479DDDFA49EB5EC07F39F3B /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		DB8C44F6CA122BD9B98493EA /* StableFlowPro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StableFlowPro.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		6568AEF695B92030DFA685C4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DB8C44F6CA122BD9B98493EA /* StableFlowPro.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7ACA2AB07EC42BA4B3EDE6B8 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				3737B9713CDD8B4CABD89986 /* ContentView.swift */,
+				B15F02474077F72697ECBD37 /* FeatureMotionEstimator.swift */,
+				8B118A7523930AECE3D194DF /* GPUStabilizer.swift */,
+				69495682672F9F336D7DD1F2 /* ImprovedStabilizer.swift */,
+				82EDEBB721F781CF765EABFA /* MetalStabilizer.swift */,
+				D479DDDFA49EB5EC07F39F3B /* Shaders.metal */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		956AD6B7EE47D3344BE64A67 = {
+			isa = PBXGroup;
+			children = (
+				7ACA2AB07EC42BA4B3EDE6B8 /* Sources */,
+				6A50DB6B24274F88B01609D1 /* AppIcon.icns */,
+				6568AEF695B92030DFA685C4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A07C48D1C6F71710CF55DDBD /* StableFlowPro */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1B80C7EF69BA336CF2DCAD11 /* Build configuration list for PBXNativeTarget "StableFlowPro" */;
+			buildPhases = (
+				A11C73F488A22B2C982E3BD5 /* Sources */,
+				E60B4FC13E4202798E2A45C9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = StableFlowPro;
+			packageProductDependencies = (
+			);
+			productName = StableFlowPro;
+			productReference = DB8C44F6CA122BD9B98493EA /* StableFlowPro.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9AC0F44B994DCC9E6B2CF9FF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = C065F82348A5DDE9060B037B /* Build configuration list for PBXProject "StableFlowPro" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 956AD6B7EE47D3344BE64A67;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6568AEF695B92030DFA685C4 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A07C48D1C6F71710CF55DDBD /* StableFlowPro */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E60B4FC13E4202798E2A45C9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A1F214E28E84BFA9D1C8E11 /* AppIcon.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A11C73F488A22B2C982E3BD5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				644BFB132789782AE755FC7C /* ContentView.swift in Sources */,
+				717313CC3B3A1451C37998DD /* FeatureMotionEstimator.swift in Sources */,
+				84FE55B9A6A7F6779836A1B6 /* GPUStabilizer.swift in Sources */,
+				FC90D0733CA4525CE3BA7CED /* ImprovedStabilizer.swift in Sources */,
+				456FCC699695E48D13DA6662 /* MetalStabilizer.swift in Sources */,
+				15AAB8B869B2941A93F45957 /* Shaders.metal in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		60E7A1660B93AF8374AE07C9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/StableFlowPro-AppStore.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.stableflow.pro;
+				PRODUCT_NAME = StableFlowPro;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		70213AAFD06EB042995A8052 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A81BD76C112ACC506758676F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AD59A89AAEBE71E9A39B9964 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/StableFlowPro-AppStore.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.stableflow.pro;
+				PRODUCT_NAME = StableFlowPro;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1B80C7EF69BA336CF2DCAD11 /* Build configuration list for PBXNativeTarget "StableFlowPro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				60E7A1660B93AF8374AE07C9 /* Debug */,
+				AD59A89AAEBE71E9A39B9964 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C065F82348A5DDE9060B037B /* Build configuration list for PBXProject "StableFlowPro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				70213AAFD06EB042995A8052 /* Debug */,
+				A81BD76C112ACC506758676F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9AC0F44B994DCC9E6B2CF9FF /* Project object */;
+}

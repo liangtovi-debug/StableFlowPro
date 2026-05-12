@@ -1,0 +1,25 @@
+{
+  "name": "StableFlow",
+  "targets": {
+    "StableFlow": {
+      "type": "application",
+      "platform": "macOS",
+      "sources": ["Sources"],
+      "settings": {
+        "base": {
+          "PRODUCT_BUNDLE_IDENTIFIER": "com.stableflow.app",
+          "PRODUCT_NAME": "StableFlow",
+          "MARKETING_VERSION": "1.0.0",
+          "CURRENT_PROJECT_VERSION": "1",
+          "INFOPLIST_FILE": "Resources/Info.plist",
+          "GENERATE_INFOPLIST_FILE": false,
+          "SWIFT_VERSION": "5.9",
+          "MACOSX_DEPLOYMENT_TARGET": "13.0",
+          "CODE_SIGN_IDENTITY": "-",
+          "CODE_SIGN_STYLE": "Manual",
+          "COMBINE_HIDPI_IMAGES": true
+        }
+      }
+    }
+  }
+}
