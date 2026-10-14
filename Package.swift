@@ -20,6 +20,11 @@ let package = Package(
             resources: [
                 .copy("Shaders.metal")
             ]
+        ),
+        .testTarget(
+            name: "StableFlowTests",
+            dependencies: ["StableFlow"],
+            path: "Tests/StableFlowTests"
         )
     ]
 )

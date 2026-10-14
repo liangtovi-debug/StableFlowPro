@@ -34,12 +34,15 @@ class ImprovedStabilizer {
         return CIContext(options: nil)
     }()
     private(set) var lastAnalysis: StabilizationAnalysis?
+    private(set) var lastWarning: String?
     
     // 调试模式
     var debugMode: Bool = false
 
     func reset() {
         gpuStabilizer = nil
+        lastAnalysis = nil
+        lastWarning = nil
     }
     
     func stabilizeVideo(
@@ -56,6 +59,25 @@ class ImprovedStabilizer {
         clipEnd: Double = 1,
         progressHandler: @escaping (Double, String) -> Void
     ) -> Bool {
+        lastAnalysis = nil
+        lastWarning = nil
+        var succeeded = false
+        defer {
+            if !succeeded { lastAnalysis = nil }
+        }
+
+        guard inputURL.standardizedFileURL.resolvingSymlinksInPath() != outputURL.standardizedFileURL.resolvingSymlinksInPath() else {
+            progressHandler(1.0, "错误：输入和输出不能是同一文件")
+            return false
+        }
+        guard smoothFactor.isFinite, (0...1).contains(smoothFactor),
+              stabilizeStrength.isFinite, (0...1).contains(stabilizeStrength),
+              trackingBoxSize.width.isFinite, trackingBoxSize.height.isFinite,
+              trackingBoxSize.width > 0, trackingBoxSize.height > 0,
+              trackingPoint.map({ $0.x.isFinite && $0.y.isFinite }) ?? true else {
+            progressHandler(1.0, "错误：无效处理参数")
+            return false
+        }
         
         // 调试信息
         if debugMode {
@@ -73,11 +95,23 @@ class ImprovedStabilizer {
         }
 
         let videoTrack = videoInfo.track
-        let width = Int(videoInfo.naturalSize.width)
-        let height = Int(videoInfo.naturalSize.height)
         let preferredTransform = videoInfo.preferredTransform
         let totalDuration = CMTimeGetSeconds(videoInfo.duration)
         let fps = Double(videoInfo.nominalFrameRate)
+
+        guard videoInfo.naturalSize.width.isFinite, videoInfo.naturalSize.height.isFinite,
+              videoInfo.naturalSize.width > 0, videoInfo.naturalSize.height > 0,
+              videoInfo.naturalSize.width <= CGFloat(Int32.max),
+              videoInfo.naturalSize.height <= CGFloat(Int32.max),
+              fps.isFinite, fps > 0, fps <= Double(Int32.max),
+              let clipTimeRange = Self.makeClipTimeRange(
+                duration: videoInfo.duration, clipStart: clipStart, clipEnd: clipEnd
+              ) else {
+            progressHandler(1.0, "错误：无效视频或裁切参数")
+            return false
+        }
+        let width = Int(videoInfo.naturalSize.width)
+        let height = Int(videoInfo.naturalSize.height)
         
         if debugMode {
             print("视频: \(width)x\(height), \(fps)fps, \(totalDuration)s")
@@ -88,15 +122,12 @@ class ImprovedStabilizer {
             return false
         }
         
-        let startTime = totalDuration * clipStart
-        let endTime = totalDuration * clipEnd
-        let clipDuration = endTime - startTime
-        let clipTimescale = videoInfo.duration.timescale > 0
-            ? videoInfo.duration.timescale
-            : CMTimeScale(max(600, Int32((fps * 1000).rounded(.toNearestOrEven))))
-        let clipStartTime = CMTime(seconds: startTime, preferredTimescale: clipTimescale)
-        let clipDurationTime = CMTime(seconds: max(clipDuration, 0), preferredTimescale: clipTimescale)
-        let clipTimeRange = CMTimeRange(start: clipStartTime, duration: clipDurationTime)
+        let clipStartTime = clipTimeRange.start
+        let clipDuration = CMTimeGetSeconds(clipTimeRange.duration)
+        guard (clipDuration * fps).isFinite, clipDuration * fps < Double(Int.max) else {
+            progressHandler(1.0, "错误：视频时长或帧率过大")
+            return false
+        }
         
         // 跟踪点
         let trackX: CGFloat
@@ -123,14 +154,12 @@ class ImprovedStabilizer {
                 asset: asset,
                 videoTrack: videoTrack,
                 settings: settings,
-                startTime: startTime,
-                endTime: endTime,
+                clipTimeRange: clipTimeRange,
                 clipDuration: clipDuration,
                 fps: fps,
                 initialPoint: CGPoint(x: trackX, y: trackY),
                 trackingBoxSize: trackingBoxSize,
                 frameSize: CGSize(width: width, height: height),
-                preferredTransform: preferredTransform,
                 progressHandler: progressHandler
             ) {
                 trajectory = visionTrajectory.map { (x: Float($0.x), y: Float($0.y)) }
@@ -175,24 +204,32 @@ class ImprovedStabilizer {
             }
             
             let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: settings)
+            guard reader.canAdd(output) else {
+                progressHandler(1.0, "错误：无法读取视频轨道")
+                return false
+            }
             reader.add(output)
             reader.timeRange = clipTimeRange
-            reader.startReading()
+            guard reader.startReading() else {
+                progressHandler(1.0, "错误：无法开始读取视频")
+                return false
+            }
             
             var prevTexture: MTLTexture?
             var frameCount = 0
             let totalFrames = Int(clipDuration * fps)
             let trackingProgressInterval = max(1, totalFrames / 120)
             
-            while let sample = output.copyNextSampleBuffer() {
+            var trackingFailed = false
+            while !trackingFailed, let sample = output.copyNextSampleBuffer() {
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                guard Self.includesPresentationTime(pts, in: clipTimeRange) else { continue }
                 autoreleasepool {
-                    let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-                    let ptsSec = CMTimeGetSeconds(pts)
-                    
-                    guard ptsSec >= startTime && ptsSec <= endTime else { return }
-                    guard let pixelBuf = CMSampleBufferGetImageBuffer(sample) else { return }
-                    
-                    guard let currTexture = gpu.createTexture(from: pixelBuf) else { return }
+                    guard let pixelBuf = CMSampleBufferGetImageBuffer(sample),
+                          let currTexture = gpu.createTexture(from: pixelBuf) else {
+                        trackingFailed = true
+                        return
+                    }
                     
                     defer {
                         prevTexture = currTexture
@@ -210,6 +247,11 @@ class ImprovedStabilizer {
                     
                     trajectory.append((x: gpu.currentPoint.x, y: gpu.currentPoint.y))
                 }
+            }
+            guard !trackingFailed, reader.status == .completed else {
+                reader.cancelReading()
+                progressHandler(1.0, "错误：视频跟踪读取失败")
+                return false
             }
         }
         
@@ -521,23 +563,44 @@ class ImprovedStabilizer {
             videoCodec = .h264
         }
         
-        try? FileManager.default.removeItem(at: outputURL)
-        
-        guard let writer = try? AVAssetWriter(outputURL: outputURL, fileType: writerFileType) else {
+        // Keep an existing destination intact until a complete export is ready.
+        let workingOutputURL = outputURL.deletingLastPathComponent()
+            .appendingPathComponent(".stableflow-" + UUID().uuidString)
+            .appendingPathExtension(outputURL.pathExtension)
+        guard let writer = try? AVAssetWriter(outputURL: workingOutputURL, fileType: writerFileType) else {
             progressHandler(1.0, "错误：无法创建输出")
             return false
         }
         
-        let videoSettings: [String: Any] = [
+        defer {
+            if !succeeded {
+                if writer.status == .writing { writer.cancelWriting() }
+                try? FileManager.default.removeItem(at: workingOutputURL)
+            }
+        }
+
+        var videoSettings: [String: Any] = [
             AVVideoCodecKey: videoCodec,
             AVVideoWidthKey: outputW,
-            AVVideoHeightKey: outputH,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: Int(Double(outputW * outputH) * fps * 0.1 * bitrateMultiplier),
+            AVVideoHeightKey: outputH
+        ]
+        // ProRes chooses its own bitrate and does not accept H.264 rate-control keys.
+        if videoCodec == .h264 {
+            let bitrate = Double(outputW) * Double(outputH) * fps * 0.1 * bitrateMultiplier
+            guard bitrate.isFinite, bitrate > 0, bitrate < Double(Int.max) else {
+                progressHandler(1.0, "错误：无效输出码率")
+                return false
+            }
+            videoSettings[AVVideoCompressionPropertiesKey] = [
+                AVVideoAverageBitRateKey: max(1, Int(bitrate)),
                 AVVideoExpectedSourceFrameRateKey: Int(fps),
                 AVVideoMaxKeyFrameIntervalKey: Int(fps)
             ]
-        ]
+        }
+        guard writer.canApply(outputSettings: videoSettings, forMediaType: .video) else {
+            progressHandler(1.0, "错误：不支持所选导出格式")
+            return false
+        }
         
         let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         writerInput.expectsMediaDataInRealTime = false
@@ -554,8 +617,15 @@ class ImprovedStabilizer {
             assetWriterInput: writerInput,
             sourcePixelBufferAttributes: adaptorAttrs
         )
+        guard writer.canAdd(writerInput) else {
+            progressHandler(1.0, "错误：无法创建视频写入轨道")
+            return false
+        }
         writer.add(writerInput)
-        writer.startWriting()
+        guard writer.startWriting() else {
+            progressHandler(1.0, "错误：无法开始写入视频")
+            return false
+        }
         writer.startSession(atSourceTime: .zero)
         
         guard let reader2 = try? AVAssetReader(asset: asset) else {
@@ -564,9 +634,19 @@ class ImprovedStabilizer {
         }
         
         let out2 = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: settings)
+        guard reader2.canAdd(out2) else {
+            progressHandler(1.0, "错误：无法重新读取视频轨道")
+            return false
+        }
         reader2.add(out2)
         reader2.timeRange = clipTimeRange
-        reader2.startReading()
+        guard reader2.startReading() else {
+            progressHandler(1.0, "错误：无法开始渲染读取")
+            return false
+        }
+        defer {
+            if reader2.status == .reading { reader2.cancelReading() }
+        }
         
         var frameIndex = 0
         let totalFrames = transforms.count
@@ -591,34 +671,42 @@ class ImprovedStabilizer {
             &renderPool
         )
 
-        while let sample = out2.copyNextSampleBuffer() {
+        var renderFailed = false
+        while !renderFailed, let sample = out2.copyNextSampleBuffer() {
+            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+            guard Self.includesPresentationTime(pts, in: clipTimeRange) else { continue }
             autoreleasepool {
-                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-
-                let tx: Float
-                let ty: Float
-                if frameIndex < totalFrames {
-                    tx = transforms[frameIndex].x
-                    ty = transforms[frameIndex].y
-                } else {
-                    tx = 0
-                    ty = 0
+                guard frameIndex < totalFrames else {
+                    renderFailed = true
+                    return
                 }
+                let tx = transforms[frameIndex].x
+                let ty = transforms[frameIndex].y
 
-                if let inBuf = CMSampleBufferGetImageBuffer(sample),
-                   let outBuf = applyGPULegacy(
+                guard let inBuf = CMSampleBufferGetImageBuffer(sample),
+                      let outBuf = applyGPULegacy(
                         input: inBuf,
                         width: width, height: height,
                         outputW: outputW, outputH: outputH,
                        shiftX: CGFloat(tx), shiftY: CGFloat(ty),
                        scale: renderScale,
                        pixelBufferPool: renderPool
-                   ) {
-                    let presentationTime = adjustedPresentationTime(for: pts, relativeTo: clipStartTime)
-                    while !adaptor.assetWriterInput.isReadyForMoreMediaData {
-                        Thread.sleep(forTimeInterval: 0.01)
+                      ) else {
+                    renderFailed = true
+                    return
+                }
+                let presentationTime = adjustedPresentationTime(for: pts, relativeTo: clipStartTime)
+                while !adaptor.assetWriterInput.isReadyForMoreMediaData {
+                    guard writer.status == .writing else {
+                        renderFailed = true
+                        return
                     }
-                    adaptor.append(outBuf, withPresentationTime: presentationTime)
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                guard writer.status == .writing,
+                      adaptor.append(outBuf, withPresentationTime: presentationTime) else {
+                    renderFailed = true
+                    return
                 }
 
                 frameIndex += 1
@@ -629,26 +717,44 @@ class ImprovedStabilizer {
                 }
             }
         }
-        
+
+        guard !renderFailed, reader2.status == .completed,
+              frameIndex == totalFrames, frameIndex > 0, writer.status == .writing else {
+            progressHandler(1.0, "错误：视频读取或写入失败")
+            return false
+        }
+        writer.endSession(atSourceTime: clipTimeRange.duration)
         writerInput.markAsFinished()
         let sem = DispatchSemaphore(value: 0)
         writer.finishWriting { sem.signal() }
         sem.wait()
         
-        if FileManager.default.fileExists(atPath: outputURL.path) {
+        if writer.status == .completed, FileManager.default.fileExists(atPath: workingOutputURL.path) {
             if videoInfo.audioTrack != nil {
                 progressHandler(0.98, "合并原始音频...")
                 let merged = muxOriginalAudioIfPossible(
                     from: asset,
-                    into: outputURL,
+                    into: workingOutputURL,
                     clipTimeRange: clipTimeRange,
                     outputFileType: writerFileType
                 )
-                if debugMode && !merged {
-                    print("警告: 原始音频合并失败，保留静音视频输出")
+                if !merged {
+                    lastWarning = "原始音频合并失败，导出为静音视频"
+                    if debugMode { print("警告: \(lastWarning!)") }
                 }
             }
-            progressHandler(1.0, "完成")
+            do {
+                if FileManager.default.fileExists(atPath: outputURL.path) {
+                    _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: workingOutputURL)
+                } else {
+                    try FileManager.default.moveItem(at: workingOutputURL, to: outputURL)
+                }
+            } catch {
+                progressHandler(1.0, "错误：无法保存导出视频")
+                return false
+            }
+            succeeded = true
+            progressHandler(1.0, lastWarning.map { "完成（\($0)）" } ?? "完成")
             return true
         } else {
             progressHandler(1.0, "错误：写入失败")
@@ -2006,8 +2112,7 @@ class ImprovedStabilizer {
         asset: AVAsset,
         videoTrack: AVAssetTrack,
         settings: [String: Any],
-        startTime: Double,
-        endTime: Double,
+        clipTimeRange: CMTimeRange,
         clipDuration: Double,
         fps: Double,
         initialPoint: CGPoint,
@@ -2020,8 +2125,13 @@ class ImprovedStabilizer {
         }
 
         let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: settings)
+        guard reader.canAdd(output) else { return nil }
         reader.add(output)
-        reader.startReading()
+        reader.timeRange = clipTimeRange
+        guard reader.startReading() else { return nil }
+        defer {
+            if reader.status == .reading { reader.cancelReading() }
+        }
 
         let downsampleStep = max(2, Int(max(frameSize.width, frameSize.height) / 480.0))
         let scaledBox = CGSize(
@@ -2037,7 +2147,6 @@ class ImprovedStabilizer {
         var tracker: RectangleTemplateTracker?
         let gpuTracker = GPUStabilizer()
         gpuTracker?.debugMode = debugMode
-        gpuTracker?.debugMode = debugMode
         var previousTexture: MTLTexture?
         var lastNormalizedPoint = CGPoint(
             x: initialPoint.x / frameSize.width,
@@ -2047,14 +2156,16 @@ class ImprovedStabilizer {
         let totalFrames = Int(clipDuration * fps)
         let templateProgressInterval = max(1, totalFrames / 120)
 
-        while let sample = output.copyNextSampleBuffer() {
+        var trackingFailed = false
+        while !trackingFailed, let sample = output.copyNextSampleBuffer() {
+            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+            guard Self.includesPresentationTime(pts, in: clipTimeRange) else { continue }
             autoreleasepool {
-                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-                let ptsSec = CMTimeGetSeconds(pts)
-
-                guard ptsSec >= startTime && ptsSec <= endTime else { return }
                 guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample),
-                      let grayFrame = makeGrayscaleFrame(from: pixelBuffer, step: downsampleStep) else { return }
+                      let grayFrame = makeGrayscaleFrame(from: pixelBuffer, step: downsampleStep) else {
+                    trackingFailed = true
+                    return
+                }
                 let currentTexture = gpuTracker?.createTexture(from: pixelBuffer)
                 var gpuPoint: CGPoint?
                 if let gpuTracker, let currentTexture {
@@ -2080,7 +2191,10 @@ class ImprovedStabilizer {
                     )
                 }
 
-                guard var activeTracker = tracker else { return }
+                guard var activeTracker = tracker else {
+                    trackingFailed = true
+                    return
+                }
                 let templateResult = frameCount == 0
                     ? RectangleTemplateTracker.TrackResult(
                         point: activeTracker.lastCenter,
@@ -2143,7 +2257,7 @@ class ImprovedStabilizer {
             }
         }
 
-        return trajectory.count > 2 ? trajectory : nil
+        return !trackingFailed && reader.status == .completed && trajectory.count > 2 ? trajectory : nil
     }
 
     private func makeGrayscaleFrame(
@@ -2181,35 +2295,16 @@ class ImprovedStabilizer {
         return GrayscaleFrame(width: scaledWidth, height: scaledHeight, pixels: pixels)
     }
 
-    /// 从 preferredTransform 推导 Vision 所需的像素朝向。
-    /// 原始像素数据按 naturalSize 排列，preferredTransform 描述播放器如何旋转显示。
-    private func cgImageOrientation(from transform: CGAffineTransform) -> CGImagePropertyOrientation {
-        let a = transform.a, b = transform.b, c = transform.c, d = transform.d
-        // 90° CW 存储（手机竖拍常见）：b≈1, c≈-1
-        if abs(b - 1) < 0.1 && abs(c + 1) < 0.1 { return .right }
-        // 90° CCW 存储：b≈-1, c≈1
-        if abs(b + 1) < 0.1 && abs(c - 1) < 0.1 { return .left }
-        // 180° 存储：a≈-1, d≈-1
-        if abs(a + 1) < 0.1 && abs(d + 1) < 0.1 { return .down }
-        // 水平镜像：a≈-1, d≈1
-        if abs(a + 1) < 0.1 && abs(d - 1) < 0.1 { return .upMirrored }
-        // 垂直镜像：a≈1, d≈-1
-        if abs(a - 1) < 0.1 && abs(d + 1) < 0.1 { return .downMirrored }
-        return .up
-    }
-
     private func trackTrajectoryWithVision(
         asset: AVAsset,
         videoTrack: AVAssetTrack,
         settings: [String: Any],
-        startTime: Double,
-        endTime: Double,
+        clipTimeRange: CMTimeRange,
         clipDuration: Double,
         fps: Double,
         initialPoint: CGPoint,
         trackingBoxSize: CGSize,
         frameSize: CGSize,
-        preferredTransform: CGAffineTransform = .identity,
         progressHandler: @escaping (Double, String) -> Void
     ) -> [CGPoint]? {
         guard let reader = try? AVAssetReader(asset: asset) else {
@@ -2217,8 +2312,13 @@ class ImprovedStabilizer {
         }
         
         let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: settings)
+        guard reader.canAdd(output) else { return nil }
         reader.add(output)
-        reader.startReading()
+        reader.timeRange = clipTimeRange
+        guard reader.startReading() else { return nil }
+        defer {
+            if reader.status == .reading { reader.cancelReading() }
+        }
         
         // 小框保底：Vision 需要足够大的区域才能稳定跟踪（特别是旋转时）
         let minNormalizedDim: CGFloat = 0.06
@@ -2252,13 +2352,15 @@ class ImprovedStabilizer {
         let visionProgressInterval = max(1, totalFrames / 120)
         var previousTexture: MTLTexture?
         
-        while let sample = output.copyNextSampleBuffer() {
+        var trackingFailed = false
+        while !trackingFailed, let sample = output.copyNextSampleBuffer() {
+            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+            guard Self.includesPresentationTime(pts, in: clipTimeRange) else { continue }
             autoreleasepool {
-                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-                let ptsSec = CMTimeGetSeconds(pts)
-                
-                guard ptsSec >= startTime && ptsSec <= endTime else { return }
-                guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else { return }
+                guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
+                    trackingFailed = true
+                    return
+                }
                 let currentTexture = gpuTracker?.createTexture(from: pixelBuffer)
                 var gpuPoint: CGPoint?
                 if let gpuTracker, let prevTexture = previousTexture, let currentTexture {
@@ -2303,8 +2405,9 @@ class ImprovedStabilizer {
                         }
                         
                         guard let activeRequest = request else { return }
-                        let visionOrientation = cgImageOrientation(from: preferredTransform)
-                        try sequenceHandler.perform([activeRequest], on: pixelBuffer, orientation: visionOrientation)
+                        // Selections, GPU points, and compensation all use the raw buffer's
+                        // coordinates. Display orientation is applied only to the exported track.
+                        try sequenceHandler.perform([activeRequest], on: pixelBuffer, orientation: .up)
                         
                         if let observation = activeRequest.results?.first as? VNDetectedObjectObservation,
                            observation.confidence > 0.08 {
@@ -2462,7 +2565,7 @@ class ImprovedStabilizer {
             }
         }
         
-        return trajectory.isEmpty ? nil : trajectory
+        return !trackingFailed && reader.status == .completed && !trajectory.isEmpty ? trajectory : nil
     }
 
     private func expandBoundingBox(_ rect: CGRect, scale: CGFloat) -> CGRect {
@@ -2607,6 +2710,26 @@ class ImprovedStabilizer {
         return out
     }
 
+    static func makeClipTimeRange(duration: CMTime, clipStart: Double, clipEnd: Double) -> CMTimeRange? {
+        let seconds = CMTimeGetSeconds(duration)
+        guard duration.isNumeric, seconds.isFinite, seconds > 0,
+              clipStart.isFinite, clipEnd.isFinite,
+              clipStart >= 0, clipEnd <= 1, clipStart < clipEnd else {
+            return nil
+        }
+        let timescale = max(duration.timescale, 600)
+        let start = CMTime(seconds: seconds * clipStart, preferredTimescale: timescale)
+        let end = CMTime(seconds: seconds * clipEnd, preferredTimescale: timescale)
+        guard start.isNumeric, end.isNumeric, CMTimeCompare(end, start) > 0 else { return nil }
+        return CMTimeRange(start: start, end: end)
+    }
+
+    // Use the same half-open interval for every pass, including sample buffers
+    // returned as preroll by AVAssetReader. An end-boundary frame belongs to the next clip.
+    static func includesPresentationTime(_ time: CMTime, in range: CMTimeRange) -> Bool {
+        time.isNumeric && CMTimeRangeContainsTime(range, time: time)
+    }
+
     private func adjustedPresentationTime(for time: CMTime, relativeTo start: CMTime) -> CMTime {
         let adjusted = CMTimeSubtract(time, start)
         return CMTimeCompare(adjusted, .zero) < 0 ? .zero : adjusted
@@ -2635,7 +2758,17 @@ class ImprovedStabilizer {
 
                 let processedDuration = try await processedAsset.load(.duration)
                 let audioDuration = CMTimeMinimum(processedDuration, clipTimeRange.duration)
-                let audioRange = CMTimeRange(start: clipTimeRange.start, duration: audioDuration)
+                let sourceAudioRange = try await sourceAudioTrack.load(.timeRange)
+                let audioStart = CMTimeMaximum(clipTimeRange.start, sourceAudioRange.start)
+                let audioEnd = CMTimeMinimum(
+                    CMTimeAdd(clipTimeRange.start, audioDuration),
+                    CMTimeRangeGetEnd(sourceAudioRange)
+                )
+                guard CMTimeCompare(audioEnd, audioStart) > 0 else {
+                    result = true // The selected clip does not overlap the source audio.
+                    return
+                }
+                let audioRange = CMTimeRange(start: audioStart, end: audioEnd)
 
                 let composition = AVMutableComposition()
                 guard let compositionVideoTrack = composition.addMutableTrack(
@@ -2659,14 +2792,14 @@ class ImprovedStabilizer {
                 try compositionAudioTrack.insertTimeRange(
                     audioRange,
                     of: sourceAudioTrack,
-                    at: .zero
+                    at: CMTimeSubtract(audioStart, clipTimeRange.start)
                 )
 
                 let tempURL = outputURL
                     .deletingLastPathComponent()
-                    .appendingPathComponent(outputURL.deletingPathExtension().lastPathComponent + "_muxed")
+                    .appendingPathComponent(outputURL.deletingPathExtension().lastPathComponent + "_muxed_" + UUID().uuidString)
                     .appendingPathExtension(outputURL.pathExtension)
-                try? FileManager.default.removeItem(at: tempURL)
+                defer { try? FileManager.default.removeItem(at: tempURL) }
 
                 guard let exporter = AVAssetExportSession(
                     asset: composition,
@@ -2693,8 +2826,7 @@ class ImprovedStabilizer {
                     return
                 }
 
-                try? FileManager.default.removeItem(at: outputURL)
-                try FileManager.default.moveItem(at: tempURL, to: outputURL)
+                _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: tempURL)
                 result = true
             } catch {
                 if self.debugMode {

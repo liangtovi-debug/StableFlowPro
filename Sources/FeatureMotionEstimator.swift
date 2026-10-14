@@ -60,6 +60,7 @@ class FeatureMotionEstimator {
     private func extractFeatures(from texture: MTLTexture) -> [CGPoint] {
         let width = texture.width
         let height = texture.height
+        guard width > 10, height > 10 else { return [] }
         
         // 读取纹理数据
         let bytesPerRow = width * 4
@@ -173,51 +174,44 @@ class FeatureMotionEstimator {
     
     /// 在目标帧中查找最佳匹配
     private func findMatch(from prevTex: MTLTexture, to currTex: MTLTexture, point: CGPoint, searchRadius: CGFloat, templateSize: Int) -> CGPoint? {
-        // 读取像素数据
-        var prevData = readRegion(texture: prevTex, x: Int(point.x) - templateSize/2, y: Int(point.y) - templateSize/2, width: templateSize, height: templateSize)
-        let currData = readRegion(texture: currTex, x: Int(point.x) - Int(searchRadius) - templateSize/2, y: Int(point.y) - Int(searchRadius) - templateSize/2, width: Int(searchRadius * 2) + templateSize, height: Int(searchRadius * 2) + templateSize)
-        
-        guard !prevData.isEmpty && !currData.isEmpty else { return nil }
-        
-        // 归一化模板
-        normalizeTemplate(&prevData)
-        
-        // 滑动窗口搜索
+        guard let previous = readRegion(texture: prevTex, x: Int(point.x) - templateSize/2, y: Int(point.y) - templateSize/2, width: templateSize, height: templateSize),
+              previous.width == templateSize, previous.height == templateSize,
+              let current = readRegion(texture: currTex, x: Int(point.x) - Int(searchRadius) - templateSize/2, y: Int(point.y) - Int(searchRadius) - templateSize/2, width: Int(searchRadius * 2) + templateSize, height: Int(searchRadius * 2) + templateSize),
+              let match = Self.matchTemplate(previous.pixels, size: templateSize,
+                                            in: current.pixels, width: current.width, height: current.height) else {
+            return nil
+        }
+        return CGPoint(x: CGFloat(current.x) + match.x, y: CGFloat(current.y) + match.y)
+    }
+
+    /// Returns the matched center in the supplied search region's coordinates.
+    static func matchTemplate(_ template: [Float], size: Int, in pixels: [Float], width: Int, height: Int) -> CGPoint? {
+        guard size > 0, width >= size, height >= size,
+              template.count == size * size, pixels.count == width * height else { return nil }
+        var normalizedTemplate = template
+        guard normalizeTemplate(&normalizedTemplate) else { return nil }
         var bestMatch = CGPoint.zero
         var bestScore: Float = .greatestFiniteMagnitude // SSD，越小越好
-        
-        let searchW = Int(searchRadius * 2) + 1
-        
-        for sy in 0..<(searchW - templateSize + 1) {
-            for sx in 0..<(searchW - templateSize + 1) {
-                // 提取搜索窗口中的模板
-                var searchTemplate = [Float](repeating: 0, count: templateSize * templateSize)
-                
-                for ty in 0..<templateSize {
-                    for tx in 0..<templateSize {
-                        let srcIdx = (sy + ty) * searchW + (sx + tx)
-                        let dstIdx = ty * templateSize + tx
-                        if srcIdx < currData.count && dstIdx < searchTemplate.count {
-                            searchTemplate[dstIdx] = currData[srcIdx]
-                        }
+
+        // A radius-20, size-11 patch has 51-pixel rows and 41 possible offsets.
+        // Use the actual row stride, including when the search hits an image edge.
+        for sy in 0...(height - size) {
+            for sx in 0...(width - size) {
+                var searchTemplate = [Float](repeating: 0, count: size * size)
+                for ty in 0..<size {
+                    for tx in 0..<size {
+                        searchTemplate[ty * size + tx] = pixels[(sy + ty) * width + sx + tx]
                     }
                 }
-                
-                normalizeTemplate(&searchTemplate)
-                
-                // 计算SSD
+                guard normalizeTemplate(&searchTemplate) else { continue }
                 var ssd: Float = 0
-                for i in 0..<min(prevData.count, searchTemplate.count) {
-                    let diff = prevData[i] - searchTemplate[i]
+                for i in 0..<normalizedTemplate.count {
+                    let diff = normalizedTemplate[i] - searchTemplate[i]
                     ssd += diff * diff
                 }
-                
                 if ssd < bestScore {
                     bestScore = ssd
-                    bestMatch = CGPoint(
-                        x: point.x + CGFloat(sx - Int(searchRadius)),
-                        y: point.y + CGFloat(sy - Int(searchRadius))
-                    )
+                    bestMatch = CGPoint(x: sx + size / 2, y: sy + size / 2)
                 }
             }
         }
@@ -231,17 +225,17 @@ class FeatureMotionEstimator {
     }
     
     /// 读取纹理区域
-    private func readRegion(texture: MTLTexture, x: Int, y: Int, width: Int, height: Int) -> [Float] {
+    private func readRegion(texture: MTLTexture, x: Int, y: Int, width: Int, height: Int) -> (pixels: [Float], x: Int, y: Int, width: Int, height: Int)? {
         let w = texture.width
         let h = texture.height
         
         // 边界检查
         let rx = max(0, x)
         let ry = max(0, y)
-        let rw = min(width, w - rx)
-        let rh = min(height, h - ry)
+        let rw = min(w, x + width) - rx
+        let rh = min(h, y + height) - ry
         
-        guard rw > 0 && rh > 0 else { return [] }
+        guard rw > 0 && rh > 0 else { return nil }
         
         let bytesPerRow = rw * 4
         var data = [UInt8](repeating: 0, count: rh * bytesPerRow)
@@ -257,11 +251,12 @@ class FeatureMotionEstimator {
             grayscale[i] = r * 0.299 + g * 0.587 + b * 0.114
         }
         
-        return grayscale
+        return (grayscale, rx, ry, rw, rh)
     }
     
     /// 归一化模板
-    private func normalizeTemplate(_ template: inout [Float]) {
+    private static func normalizeTemplate(_ template: inout [Float]) -> Bool {
+        guard !template.isEmpty else { return false }
         var mean: Float = 0
         var std: Float = 0
         
@@ -274,11 +269,11 @@ class FeatureMotionEstimator {
         }
         std = sqrt(std / Float(template.count))
         
-        if std > 0.001 {
-            for i in 0..<template.count {
-                template[i] = (template[i] - mean) / std
-            }
+        guard std > 0.001 else { return false }
+        for i in 0..<template.count {
+            template[i] = (template[i] - mean) / std
         }
+        return true
     }
     
     /// 使用RANSAC计算运动变换
@@ -308,11 +303,10 @@ class FeatureMotionEstimator {
         var filteredDx: [Float] = []
         var filteredDy: [Float] = []
         
-        for i in 0..<dxList.count {
-            if abs(dxList[i] - dx) < 20 && abs(dyList[i] - dy) < 20 {
-                filteredDx.append(dxList[i])
-                filteredDy.append(dyList[i])
-            }
+        let displacements = matches.map { CGPoint(x: $0.curr.x - $0.prev.x, y: $0.curr.y - $0.prev.y) }
+        for displacement in Self.translationInliers(displacements) {
+            filteredDx.append(Float(displacement.x))
+            filteredDy.append(Float(displacement.y))
         }
         
         guard filteredDx.count >= 3 else {
@@ -344,6 +338,16 @@ class FeatureMotionEstimator {
         }
         
         return (smoothDx / weight, smoothDy / weight, confidence)
+    }
+
+    static func translationInliers(_ displacements: [CGPoint]) -> [CGPoint] {
+        guard !displacements.isEmpty else { return [] }
+        let middle = displacements.count / 2
+        let dx = displacements.map(\.x).sorted()[middle]
+        let dy = displacements.map(\.y).sorted()[middle]
+        // Sorting the two components is only for finding the median. Keep each
+        // real displacement paired when testing inliers and estimating confidence.
+        return displacements.filter { abs($0.x - dx) < 20 && abs($0.y - dy) < 20 }
     }
     
     private func createTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {

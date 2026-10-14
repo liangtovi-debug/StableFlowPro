@@ -54,5 +54,6 @@ struct StableFlowProbeMain {
         } else {
             print("analysis unavailable")
         }
+        if !success { exit(1) }
     }
 }

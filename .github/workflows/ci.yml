@@ -17,6 +17,9 @@ jobs:
       - name: Swift package build
         run: swift build -c release
 
+      - name: Swift regression tests
+        run: swift test
+
       - name: Xcode build
         run: |
           xcodebuild \
