@@ -15,6 +15,16 @@ The app is built with SwiftUI, AVFoundation, Vision, Core Image, and Metal. It r
 - Preserves source audio when possible.
 - Includes Mac App Store-oriented sandbox/export configuration.
 
+## Editing and Export Notes
+
+- Set the trim range first, then select the feature on the clip's starting frame.
+  If the selection belongs to another frame, processing seeks to the clip start
+  and asks you to select it again rather than tracking the wrong object.
+- Dragging a tracking box pauses playback and moves the existing box.
+- Export keeps the editor on the original source timeline. Use the Finder button
+  to open the finished video.
+- Existing exports are preserved; repeated exports receive a numbered filename.
+
 ## Design Goal
 
 StableFlow Pro is intended for shots where a specific object detail should stay visually locked, such as a car badge, logo, plate area, product detail, or other high-contrast feature.
@@ -47,6 +57,15 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+Run the regression tests (macOS required):
+
+```bash
+swift test
+```
+
+Metal execution tests skip when the machine has no Metal device. See
+`Tests/MANUAL_TESTS.md` for interactive editor and real-video checks.
 
 Create a local app bundle:
 

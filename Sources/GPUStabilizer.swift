@@ -245,26 +245,24 @@ class GPUStabilizer {
         encoder.setBytes(&size, length: MemoryLayout<SIMD2<Float>>.size, index: 4)
         encoder.setBytes(&radius, length: MemoryLayout<Int32>.size, index: 5)
         
-        let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
-        let numGroups = MTLSize(
-            width: (prev.width + 15) / 16,
-            height: (prev.height + 15) / 16,
-            depth: 1
-        )
+        // This kernel searches one point; the image-sized dispatch repeated the
+        // same expensive search once per pixel without producing more evidence.
+        let threadsPerGroup = MTLSize(width: 1, height: 1, depth: 1)
+        let numGroups = MTLSize(width: 1, height: 1, depth: 1)
         
         encoder.dispatchThreadgroups(numGroups, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
         
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status == .completed else { return nil }
         
         // 读取结果
         let dx = Int32(bitPattern: resultX.contents().load(as: UInt32.self))
         let dy = Int32(bitPattern: resultY.contents().load(as: UInt32.self))
         let count = Int32(bitPattern: resultCount.contents().load(as: UInt32.self))
         
-        // 如果没有足够多线程匹配成功，降低置信度
-        let confidence = Float(count) / Float(numGroups.width * numGroups.height * 4)
+        let confidence: Float = count > 0 ? 1 : 0
         
         guard count > 0 else {
             return nil  // 跟踪失败
@@ -406,6 +404,7 @@ class GPUStabilizer {
         
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status == .completed else { return nil }
         
         // 读取结果
         let dx = Int32(bitPattern: resultX.contents().load(as: UInt32.self))
@@ -539,6 +538,7 @@ class GPUStabilizer {
         
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status == .completed else { return }
         
         self.templateTexture = patchTex
         print("Template initialized at \(point)")
@@ -557,7 +557,8 @@ class GPUStabilizer {
         }
         
         let searchR = Int(searchRadiusTemplate)
-        let totalCandidates = (searchR * 2 + 1) * (searchR * 2 + 1)
+        let totalWidth = searchR * 2 + 1
+        let totalCandidates = totalWidth * totalWidth
         
         // 创建误差buffer
         guard let errorsBuffer = device.makeBuffer(
@@ -591,8 +592,8 @@ class GPUStabilizer {
         
         let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
         let numGroups = MTLSize(
-            width: (searchR * 2 + 15) / 16,
-            height: (searchR * 2 + 15) / 16,
+            width: (totalWidth + 15) / 16,
+            height: (totalWidth + 15) / 16,
             depth: 1
         )
         
@@ -601,20 +602,33 @@ class GPUStabilizer {
         
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status == .completed else { return nil }
         
         // 找最小误差
         let errors = errorsBuffer.contents().bindMemory(to: Float.self, capacity: totalCandidates)
         
         var minError: Float = 1e9
         var minIndex: Int = 0
-        
+        var minDistanceSquared = Int.max
+
         for i in 0..<totalCandidates {
-            if errors[i] < minError {
+            let dx = i % totalWidth - searchR
+            let dy = i / totalWidth - searchR
+            let distanceSquared = dx * dx + dy * dy
+            if errors[i] < minError ||
+                (errors[i] == minError && distanceSquared < minDistanceSquared) {
                 minError = errors[i]
                 minIndex = i
+                minDistanceSquared = distanceSquared
             }
         }
-        
+
+        // A minimum index exists even when no candidate was evaluated. Never
+        // turn the sentinel into a successful recovery and replace the template.
+        guard minError.isFinite, minError < 1e9 else {
+            return nil
+        }
+
         // 计算最佳位置
         let dx = minIndex % (searchR * 2 + 1) - searchR
         let dy = minIndex / (searchR * 2 + 1) - searchR
@@ -645,7 +659,7 @@ class GPUStabilizer {
             initTemplate(from: prev, at: centerPoint)
             currentPoint = centerPoint
             lastGoodPoint = centerPoint
-            return currentPoint
+            // Initialization uses prev; still track prev -> curr on this call.
         }
         
         // 1. 光流跟踪
@@ -744,7 +758,7 @@ class GPUStabilizer {
             currentPoint.y + (finalPoint.y - currentPoint.y) * trackingBlend
         )
 
-        if flowValid || needsRecovery || templateResult != nil {
+        if flowValid || templateResult != nil {
             lastGoodPoint = currentPoint
         }
 

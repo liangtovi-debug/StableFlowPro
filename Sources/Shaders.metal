@@ -116,7 +116,7 @@ kernel void opticalFlowGradient(
     constant int &radius [[buffer(5)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
-    int winSize = 3;
+    constexpr int winSize = 3;
     int r = radius;
     
     // 归一化坐标转像素坐标
@@ -125,8 +125,10 @@ kernel void opticalFlowGradient(
     int py = int(pt.y);
     
     // 边界检查
-    if (px < r + winSize || px >= int(size.x) - r - winSize ||
-        py < r + winSize || py >= int(size.y) - r - winSize) {
+    // The gradient samples one pixel beyond the matching window.
+    int margin = r + winSize + 1;
+    if (px < margin || px >= int(size.x) - margin ||
+        py < margin || py >= int(size.y) - margin) {
         return;
     }
     
@@ -135,8 +137,9 @@ kernel void opticalFlowGradient(
     int bestDy = 0;
     
     // 预计算前一帧的梯度
-    float gx[5][5];
-    float gy[5][5];
+    float gx[2 * winSize + 1][2 * winSize + 1];
+    float gy[2 * winSize + 1][2 * winSize + 1];
+    float gradientEnergy = 0.0;
     
     for (int wy = -winSize; wy <= winSize; wy++) {
         for (int wx = -winSize; wx <= winSize; wx++) {
@@ -149,9 +152,14 @@ kernel void opticalFlowGradient(
             float up = prevTex.read(uint2(px + wx, py + wy - 1)).r;
             float down = prevTex.read(uint2(px + wx, py + wy + 1)).r;
             gy[wx+winSize][wy+winSize] = fabs(down - up);
+            gradientEnergy += gx[wx+winSize][wy+winSize] + gy[wx+winSize][wy+winSize];
         }
     }
     
+    // A flat patch has equally good matches everywhere. Do not report the
+    // first search candidate (-radius, -radius) as reliable motion.
+    if (gradientEnergy == 0.0) return;
+
     // 搜索最佳匹配
     for (int dx = -r; dx <= r; dx++) {
         for (int dy = -r; dy <= r; dy++) {
@@ -323,16 +331,12 @@ kernel void templateMatchParallel(
     
     int totalWidth = searchR * 2 + 1;
     
-    // 当前线程对应的搜索偏移
+    // Rounded threadgroups include padding in both dimensions. Check each
+    // coordinate before flattening so padding cannot alias another row.
+    if (gid.x >= uint(totalWidth) || gid.y >= uint(totalWidth)) return;
     int idx = int(gid.x) + int(gid.y) * totalWidth;
-    int dx = idx % totalWidth - searchR;
-    int dy = idx / totalWidth - searchR;
-    
-    // 越界检查
-    if (dx < -searchR || dx > searchR || dy < -searchR || dy > searchR ||
-        idx >= totalWidth * totalWidth) {
-        return;
-    }
+    int dx = int(gid.x) - searchR;
+    int dy = int(gid.y) - searchR;
     
     // 计算候选位置的像素坐标
     float2 candidatePos = float2(
@@ -422,7 +426,7 @@ kernel void opticalFlowMultiPoint(
     if (tid >= uint(numPoints)) return;
     
     float2 point = points[tid];
-    int winSize = 3;
+    constexpr int winSize = 3;
     int r = radius;
     
     // 归一化坐标转像素坐标
@@ -431,8 +435,10 @@ kernel void opticalFlowMultiPoint(
     int py = int(pt.y);
     
     // 边界检查
-    if (px < r + winSize || px >= int(size.x) - r - winSize ||
-        py < r + winSize || py >= int(size.y) - r - winSize) {
+    // The gradient samples one pixel beyond the matching window.
+    int margin = r + winSize + 1;
+    if (px < margin || px >= int(size.x) - margin ||
+        py < margin || py >= int(size.y) - margin) {
         return;
     }
     
@@ -441,8 +447,9 @@ kernel void opticalFlowMultiPoint(
     int bestDy = 0;
     
     // 预计算前一帧的梯度
-    float gx[5][5];
-    float gy[5][5];
+    float gx[2 * winSize + 1][2 * winSize + 1];
+    float gy[2 * winSize + 1][2 * winSize + 1];
+    float gradientEnergy = 0.0;
     
     for (int wy = -winSize; wy <= winSize; wy++) {
         for (int wx = -winSize; wx <= winSize; wx++) {
@@ -453,9 +460,14 @@ kernel void opticalFlowMultiPoint(
             float up = prevTex.read(uint2(px + wx, py + wy - 1)).r;
             float down = prevTex.read(uint2(px + wx, py + wy + 1)).r;
             gy[wx+winSize][wy+winSize] = fabs(down - up);
+            gradientEnergy += gx[wx+winSize][wy+winSize] + gy[wx+winSize][wy+winSize];
         }
     }
     
+    // A flat patch has equally good matches everywhere. Do not report the
+    // first search candidate (-radius, -radius) as reliable motion.
+    if (gradientEnergy == 0.0) return;
+
     // 搜索最佳匹配
     for (int dx = -r; dx <= r; dx++) {
         for (int dy = -r; dy <= r; dy++) {

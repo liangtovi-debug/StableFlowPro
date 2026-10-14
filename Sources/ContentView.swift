@@ -571,6 +571,7 @@ struct TrackerOverlay: View {
     @State private var isSelecting = false
     @State private var selectionStart = CGPoint.zero
     @State private var selectionEnd = CGPoint.zero
+    @State private var trackerDragOrigin: CGPoint?
 
     private func clampedPoint(_ point: CGPoint, to rect: CGRect) -> CGPoint {
         CGPoint(
@@ -673,9 +674,6 @@ struct TrackerOverlay: View {
                             .frame(width: boxWidth, height: boxHeight)
                             .contentShape(Rectangle())
                             .position(x: viewX, y: viewY)
-                            .gesture(DragGesture().onChanged { value in
-                                vm.moveTrackerPoint(idx, to: value.location, in: geo.size)
-                            })
 
                         // 跟踪框
                         Rectangle()
@@ -718,11 +716,22 @@ struct TrackerOverlay: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5)
                     .onChanged { v in
-                        if let trackerRect = currentTrackerRect(
-                            in: videoRect,
-                            videoWidth: CGFloat(vw),
-                            videoHeight: CGFloat(vh)
-                        ), trackerRect.insetBy(dx: -8, dy: -8).contains(v.startLocation) {
+                        if !isSelecting, trackerDragOrigin == nil {
+                            vm.pauseForTrackingSelection()
+                        }
+                        if !isSelecting, trackerDragOrigin == nil,
+                           let trackerRect = currentTrackerRect(
+                               in: videoRect,
+                               videoWidth: CGFloat(vw),
+                               videoHeight: CGFloat(vh)
+                           ), trackerRect.insetBy(dx: -8, dy: -8).contains(v.startLocation) {
+                            trackerDragOrigin = CGPoint(x: trackerRect.midX, y: trackerRect.midY)
+                        }
+                        if let origin = trackerDragOrigin, let idx = vm.selectedTrackerIndex {
+                            vm.moveTrackerPoint(idx, to: CGPoint(
+                                x: origin.x + v.translation.width,
+                                y: origin.y + v.translation.height
+                            ), in: geo.size)
                             return
                         }
                         let start = clampedPoint(v.startLocation, to: videoRect)
@@ -736,14 +745,13 @@ struct TrackerOverlay: View {
                         }
                     }
                     .onEnded { v in
+                        let wasSelecting = isSelecting
                         isSelecting = false
-                        if let trackerRect = currentTrackerRect(
-                            in: videoRect,
-                            videoWidth: CGFloat(vw),
-                            videoHeight: CGFloat(vh)
-                        ), trackerRect.insetBy(dx: -8, dy: -8).contains(v.startLocation) {
+                        if trackerDragOrigin != nil {
+                            trackerDragOrigin = nil
                             return
                         }
+                        guard wasSelecting else { return }
                         let start = clampedPoint(v.startLocation, to: videoRect)
                         let end = clampedPoint(v.location, to: videoRect)
                         let rect = CGRect(
@@ -769,13 +777,15 @@ struct TrackerOverlay: View {
                             boxSize: CGSize(
                                 width: max(boxWidth, 24),
                                 height: max(boxHeight, 24)
-                            )
+                            ),
+                            referenceTime: vm.trackingSelectionTime
                         )]
+                        vm.stabilizationAnalysis = nil
                         vm.selectedTrackerIndex = 0
                     }
             )
         }
-        .allowsHitTesting(true)
+        .allowsHitTesting(vm.isVideoReady)
     }
 }
 
@@ -1278,6 +1288,8 @@ struct TrackerPoint: Identifiable {
     var position: CGPoint
     var boxSize: CGSize = CGSize(width: 80, height: 80)
     var isTracking: Bool = true
+    // Position belongs to this source frame, not necessarily the current playhead.
+    var referenceTime: Double = 0
 }
 
 struct ProcessingConfig {
@@ -1359,6 +1371,11 @@ class ProVideoVM: ObservableObject {
         return clips[selectedIndex]
     }
     
+    var isVideoReady: Bool {
+        guard let clip = selectedClip else { return false }
+        return videoInfoCache[clip.url] != nil
+    }
+
     private var playerItem: AVPlayerItem?
     private var observer: Any?
     private weak var observerPlayer: AVPlayer?
@@ -1368,6 +1385,7 @@ class ProVideoVM: ObservableObject {
     private var videoPreferredTransform: CGAffineTransform = .identity
     private var videoInfoCache: [URL: LoadedVideoInfo] = [:]
     private var isRestoringClipState = false
+    private(set) var editingRevision = UUID()
     private let supportedVideoExtensions: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv", "mts", "m2ts", "wmv"]
     
     init() {
@@ -1573,8 +1591,8 @@ class ProVideoVM: ObservableObject {
             .filter(isSupportedVideoURL)
         guard !supportedURLs.isEmpty else { return }
 
-        let existingPaths = Set(clips.map { $0.url.standardizedFileURL.path })
-        let newURLs = supportedURLs.filter { !existingPaths.contains($0.path) }
+        var existingPaths = Set(clips.map { $0.url.standardizedFileURL.path })
+        let newURLs = supportedURLs.filter { existingPaths.insert($0.path).inserted }
         guard !newURLs.isEmpty else {
             if let first = supportedURLs.first,
                let index = clips.firstIndex(where: { $0.url.standardizedFileURL.path == first.path }) {
@@ -1592,9 +1610,9 @@ class ProVideoVM: ObservableObject {
             clip.resolution = "加载中..."
 
             clips.append(clip)
-            selectedIndex = clips.count - 1
             loadVideoInfo(for: clips.count - 1, url: url)
         }
+        selectClip(clips.count - 1)
     }
 
     func importExternalFiles(_ urls: [URL]) {
@@ -1652,7 +1670,7 @@ class ProVideoVM: ObservableObject {
                     self.rawVideoWidth = rawVideoWidth
                     self.rawVideoHeight = rawVideoHeight
                     self.videoPreferredTransform = preferredTransform
-                    self.loadClip(index)
+                    self.durationString = durStr
                 }
             }
         }
@@ -1727,12 +1745,15 @@ class ProVideoVM: ObservableObject {
         guard !isRestoringClipState,
               selectedIndex >= 0,
               selectedIndex < clips.count else { return }
+        editingRevision = UUID()
+        stabilizationAnalysis = nil
         clips[selectedIndex].trackerPoints = trackerPoints
         clips[selectedIndex].clipStart = clipStart
         clips[selectedIndex].clipEnd = clipEnd
     }
     
     func selectClip(_ idx: Int) {
+        guard clips.indices.contains(idx) else { return }
         persistCurrentClipEditingState()
         selectedIndex = idx
         loadClip(idx)
@@ -1745,7 +1766,9 @@ class ProVideoVM: ObservableObject {
             clips[idx].isSecurityScoped = clips[idx].url.startAccessingSecurityScopedResource()
         }
         let clip = clips[idx]
-        let info = videoInfoCache[clip.url] ?? Self.loadVideoInfoSync(for: AVURLAsset(url: clip.url))
+        // Metadata is loaded off the main actor by loadVideoInfo. Never block
+        // selection/import waiting for a second copy of the same metadata load.
+        let info = videoInfoCache[clip.url]
         if let info {
             videoInfoCache[clip.url] = info
             videoWidth = info.displaySize.width
@@ -1753,6 +1776,12 @@ class ProVideoVM: ObservableObject {
             rawVideoWidth = info.naturalSize.width
             rawVideoHeight = info.naturalSize.height
             videoPreferredTransform = info.preferredTransform
+        } else {
+            videoWidth = 1920
+            videoHeight = 1080
+            rawVideoWidth = 1920
+            rawVideoHeight = 1080
+            videoPreferredTransform = .identity
         }
         
         // 简单同步创建播放器
@@ -1768,6 +1797,8 @@ class ProVideoVM: ObservableObject {
         clipStart = clip.clipStart
         clipEnd = clip.clipEnd
         trackerPoints = clip.trackerPoints
+        selectedTrackerIndex = trackerPoints.isEmpty ? nil : 0
+        currentTimeString = "00:00:00"
         isRestoringClipState = false
         // 恢复该片段上次设置的跟踪框
         stabilizationAnalysis = nil
@@ -1803,9 +1834,9 @@ class ProVideoVM: ObservableObject {
         observer = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
             queue: .main
-        ) { [weak self] time in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+        ) { [weak self, weak player] time in
+            Task { @MainActor [weak self, weak player] in
+                guard let self, let player, self.player === player else { return }
                 let cur = CMTimeGetSeconds(time)
                 let tot = CMTimeGetSeconds(self.playerItem?.duration ?? .zero)
                 if tot.isFinite && tot > 0 {
@@ -1820,9 +1851,9 @@ class ProVideoVM: ObservableObject {
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.isPlaying else { return }
+        ) { [weak self, weak player] _ in
+            Task { @MainActor [weak self, weak player] in
+                guard let self, let player, self.player === player, self.isPlaying else { return }
                 self.player?.seek(to: .zero)
                 self.player?.play()
             }
@@ -1906,13 +1937,30 @@ class ProVideoVM: ObservableObject {
     }
     
     // MARK: - 跟踪点
+    var trackingSelectionTime: Double {
+        let seconds = player.map { CMTimeGetSeconds($0.currentTime()) } ?? 0
+        return seconds.isFinite ? seconds : 0
+    }
+
+    func pauseForTrackingSelection() {
+        player?.pause()
+        isPlaying = false
+    }
+
+    nonisolated static func isTrackingReferenceAligned(_ referenceTime: Double, clipStartTime: Double, fps: Double) -> Bool {
+        guard referenceTime.isFinite, clipStartTime.isFinite, fps.isFinite, fps > 0 else { return false }
+        return abs(referenceTime - clipStartTime) <= 1 / fps + 0.001
+    }
+
     func addTrackerPoint() {
         guard videoWidth > 0, videoHeight > 0 else { return }
         let newPoint = TrackerPoint(
             position: CGPoint(x: videoWidth / 2, y: videoHeight / 2),
-            boxSize: CGSize(width: 80, height: 80)
+            boxSize: CGSize(width: 80, height: 80),
+            referenceTime: trackingSelectionTime
         )
-        trackerPoints.append(newPoint)
+        trackerPoints = [newPoint]
+        selectedTrackerIndex = 0
     }
     
     func setTrackerPoint(_ position: CGPoint, in size: CGSize) {
@@ -1923,37 +1971,68 @@ class ProVideoVM: ObservableObject {
         if trackerPoints.isEmpty {
             trackerPoints.append(TrackerPoint(
                 position: CGPoint(x: videoX, y: videoY),
-                boxSize: CGSize(width: 80, height: 80)
+                boxSize: CGSize(width: 80, height: 80),
+                referenceTime: trackingSelectionTime
             ))
         } else {
             trackerPoints[0].position = CGPoint(x: videoX, y: videoY)
+            trackerPoints[0].referenceTime = trackingSelectionTime
         }
+        selectedTrackerIndex = 0
         stabilizationAnalysis = nil
     }
     
     func moveTrackerPoint(_ idx: Int, to position: CGPoint, in size: CGSize) {
-        guard idx < trackerPoints.count else { return }
+        guard trackerPoints.indices.contains(idx) else { return }
         
         let normalized = normalizedVideoPoint(from: position, in: size)
         let videoX = normalized.x * videoWidth
         let videoY = normalized.y * videoHeight
         
         trackerPoints[idx].position = CGPoint(x: videoX, y: videoY)
+        trackerPoints[idx].referenceTime = trackingSelectionTime
         stabilizationAnalysis = nil
     }
     
     func removeTrackerPoint(_ idx: Int) {
-        guard idx < trackerPoints.count else { return }
+        guard trackerPoints.indices.contains(idx) else { return }
         trackerPoints.remove(at: idx)
+        selectedTrackerIndex = trackerPoints.isEmpty ? nil : 0
         stabilizationAnalysis = nil
     }
     
     // MARK: - 处理
     func processVideo() {
-        guard let clip = selectedClip else { return }
+        guard !isProcessing, let clip = selectedClip else { return }
         persistCurrentClipEditingState()
         guard !trackerPoints.isEmpty else {
             processStatus = "请先在预览区拖拽框选要锁定的特征"
+            return
+        }
+        guard let info = videoInfoCache[clip.url],
+              let tracker = trackerPoints.first else {
+            processStatus = "视频信息尚未就绪"
+            return
+        }
+        let durationSeconds = CMTimeGetSeconds(info.duration)
+        let fps = Double(info.nominalFrameRate)
+        guard durationSeconds.isFinite, durationSeconds > 0, fps.isFinite, fps > 0 else {
+            processStatus = "错误：无效视频时长或帧率"
+            return
+        }
+        let startSeconds = durationSeconds * clipStart
+        guard Self.isTrackingReferenceAligned(
+            tracker.referenceTime,
+            clipStartTime: startSeconds,
+            fps: fps
+        ) else {
+            pauseForTrackingSelection()
+            player?.seek(
+                to: CMTime(seconds: startSeconds, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            )
+            processStatus = "已定位到片段起点，请在此帧重新框选特征"
             return
         }
         guard ensureOutputFolder() else {
@@ -1968,10 +2047,11 @@ class ProVideoVM: ObservableObject {
         let outputURL = processedOutputURL(for: clip)
         let config = makeProcessingConfig()
         let selectedClipID = clip.id
+        let processingRevision = editingRevision
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let (success, analysis) = Self.runProcessing(
+            let (success, analysis, warning) = Self.runProcessing(
                 input: clip.url,
                 output: outputURL,
                 config: config
@@ -1992,22 +2072,40 @@ class ProVideoVM: ObservableObject {
             }
             
             DispatchQueue.main.async {
-                self.isProcessing = false
-                self.stabilizationAnalysis = analysis
-                if success {
-                    self.processStatus = "完成"
-                    if let idx = self.clips.firstIndex(where: { $0.id == selectedClipID }) {
-                        self.clips[idx].isProcessed = true
-                        self.clips[idx].processedURL = outputURL
-                        self.replacePlayer(with: AVPlayerItem(url: outputURL))
-                    }
-                } else {
-                    self.processStatus = "处理失败"
-                }
+                self.finishProcessing(
+                    clipID: selectedClipID,
+                    outputURL: outputURL,
+                    success: success,
+                    analysis: analysis,
+                    expectedEditingRevision: processingRevision,
+                    warning: warning
+                )
             }
         }
     }
     
+    // Keep the editor on its source timeline. A cropped/trimmed export has different
+    // coordinates and duration, and another clip may have been selected meanwhile.
+    func finishProcessing(
+        clipID: UUID,
+        outputURL: URL,
+        success: Bool,
+        analysis: StabilizationAnalysis?,
+        expectedEditingRevision: UUID? = nil,
+        warning: String? = nil
+    ) {
+        isProcessing = false
+        processStatus = success ? (warning.map { "完成（\($0)）" } ?? "完成") : "处理失败"
+        if selectedClip?.id == clipID,
+           expectedEditingRevision == nil || expectedEditingRevision == editingRevision {
+            stabilizationAnalysis = analysis
+        }
+        if success, let idx = clips.firstIndex(where: { $0.id == clipID }) {
+            clips[idx].isProcessed = true
+            clips[idx].processedURL = outputURL
+        }
+    }
+
     @discardableResult
     private func ensureOutputFolder() -> Bool {
         if let outputFolder {
@@ -2021,7 +2119,18 @@ class ProVideoVM: ObservableObject {
     }
 
     private func processedOutputURL(for clip: VideoClip) -> URL {
-        outputFolder!.appendingPathComponent("\(clip.name)_stable.\(exportFormat.fileExtension)")
+        Self.availableOutputURL(for: clip.name, in: outputFolder!, format: exportFormat)
+    }
+
+    nonisolated static func availableOutputURL(for name: String, in folder: URL, format: ExportFormat) -> URL {
+        let baseName = "\(name)_stable"
+        var candidate = folder.appendingPathComponent("\(baseName).\(format.fileExtension)")
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = folder.appendingPathComponent("\(baseName)_\(suffix).\(format.fileExtension)")
+            suffix += 1
+        }
+        return candidate
     }
 
     @discardableResult
@@ -2037,7 +2146,7 @@ class ProVideoVM: ObservableObject {
         let response = panel.runModal()
         guard response == .OK, let url = panel.url else { return false }
         setOutputFolder(url)
-        return true
+        return validateWritableOutputFolder(url)
     }
 
     private func setOutputFolder(_ url: URL) {
@@ -2167,10 +2276,10 @@ class ProVideoVM: ObservableObject {
         output: URL,
         config: ProcessingConfig,
         progressHandler: @escaping (Double, String) -> Void
-    ) -> (success: Bool, analysis: StabilizationAnalysis?) {
+    ) -> (success: Bool, analysis: StabilizationAnalysis?, warning: String?) {
         guard let stabilizer = ImprovedStabilizer() as ImprovedStabilizer? else {
             progressHandler(1.0, "错误：稳定器未初始化")
-            return (false, nil)
+            return (false, nil, nil)
         }
         
         stabilizer.debugMode = config.debugMode
@@ -2189,7 +2298,7 @@ class ProVideoVM: ObservableObject {
             progressHandler: progressHandler
         )
         
-        return (success, stabilizer.lastAnalysis)
+        return (success, stabilizer.lastAnalysis, stabilizer.lastWarning)
     }
 
     private nonisolated static func writeProcessingDebugReport(
